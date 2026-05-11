@@ -22,6 +22,20 @@ You're in the right place.
 
 ---
 
+## Review pull requests with Claude Code
+
+Use the included PR review agent in 3 steps:
+
+```bash
+python scripts/claude_review.py --pr https://github.com/owner/repo/pull/123
+python scripts/claude_review.py --pr https://github.com/owner/repo/pull/123 --output pr-review.md
+GITHUB_TOKEN=... python scripts/claude_review.py --pr https://github.com/owner/repo/pull/123 --post
+```
+
+The CLI emits a structured Markdown review with a 2-3 sentence summary, identified risks, improvement suggestions, and a Low/Medium/High confidence score. Claude Code users can also invoke the project sub-agent in `.claude/agents/pr-reviewer.md`, and GitHub users can enable `.github/workflows/claude-review.yml` to comment on new PRs automatically.
+
+---
+
 ## Active Bounties
 
 | # | Task | Amount | Status |
