@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from typing import Iterable
 from urllib.error import HTTPError, URLError
@@ -18,6 +20,14 @@ from urllib.request import Request, urlopen
 PR_URL = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)(?:[/?#].*)?$")
 FILE_HEADER = re.compile(r"^\+\+\+ b/(.+)$")
 HUNK_LINE = re.compile(r"^@@")
+MAX_DIFF_CHARS = 45_000
+REQUIRED_HEADINGS = (
+    "## PR Review",
+    "### Summary of Changes",
+    "### Identified Risks",
+    "### Improvement Suggestions",
+    "### Confidence Score:",
+)
 
 
 @dataclass(frozen=True)
@@ -188,6 +198,91 @@ def build_review(pr: PullRequestData) -> str:
     )
 
 
+def truncate_diff(diff: str) -> str:
+    if len(diff) <= MAX_DIFF_CHARS:
+        return diff
+    omitted = len(diff) - MAX_DIFF_CHARS
+    return f"{diff[:MAX_DIFF_CHARS]}\n\n[diff truncated: {omitted} characters omitted]"
+
+
+def claude_prompt(pr: PullRequestData) -> str:
+    paths = changed_paths(pr.diff)
+    path_list = "\n".join(f"- {path}" for path in paths) or "- No changed paths detected"
+    return f"""You are a Claude Code pull request review agent.
+
+Review the GitHub PR diff below. Ground every claim in the diff. Do not invent behavior not visible in the patch.
+Use plain ASCII Markdown. Bullet lists must use `- ` hyphen bullets.
+
+Return only Markdown with exactly these sections:
+
+## PR Review
+Source: <PR URL>
+Author: <GitHub handle>
+
+### Summary of Changes
+Write 2-3 concise sentences.
+
+### Identified Risks
+Use bullets. Include "No clear risks found from this diff." only if there are no concrete risks.
+
+### Improvement Suggestions
+Use bullets. Suggestions must be actionable for the author or maintainer.
+
+### Confidence Score: Low | Medium | High
+Choose one confidence level and add one short sentence explaining it.
+
+PR metadata:
+- URL: {pr.url}
+- Title: {pr.title}
+- Author: @{pr.author}
+- Files changed: {pr.changed_files}
+- Additions: {pr.additions}
+- Deletions: {pr.deletions}
+
+Changed paths:
+{path_list}
+
+Diff:
+```diff
+{truncate_diff(pr.diff)}
+```
+"""
+
+
+def validate_claude_review(markdown: str) -> bool:
+    if not markdown.strip():
+        return False
+    if not all(heading in markdown for heading in REQUIRED_HEADINGS):
+        return False
+    return bool(re.search(r"### Confidence Score:\s*(Low|Medium|High)\b", markdown))
+
+
+def build_claude_review(pr: PullRequestData) -> str | None:
+    executable = shutil.which("claude")
+    if os.environ.get("CLAUDE_REVIEW_OFFLINE") == "1" or not executable:
+        return None
+
+    timeout = int(os.environ.get("CLAUDE_REVIEW_TIMEOUT", "180"))
+    try:
+        result = subprocess.run(
+            [executable, "-p"],
+            input=claude_prompt(pr),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+
+    review = result.stdout.strip()
+    if not validate_claude_review(review):
+        return None
+    return review
+
+
 def post_comment(pr: PullRequestData, body: str) -> str:
     if not os.environ.get("GITHUB_TOKEN"):
         raise RuntimeError("GITHUB_TOKEN is required to post a PR comment")
@@ -208,13 +303,25 @@ def post_comment(pr: PullRequestData, body: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate a structured Markdown review for a GitHub PR.")
     parser.add_argument("--pr", required=True, help="GitHub PR URL, for example https://github.com/owner/repo/pull/123")
+    parser.add_argument(
+        "--engine",
+        choices=("auto", "claude", "heuristic"),
+        default=os.environ.get("CLAUDE_REVIEW_ENGINE", "auto"),
+        help="Review engine. auto uses Claude Code when available and falls back to the local heuristic.",
+    )
     parser.add_argument("--output", help="Write Markdown review to this file instead of stdout only")
     parser.add_argument("--post", action="store_true", help="Post the review as a GitHub issue comment. Requires GITHUB_TOKEN.")
     args = parser.parse_args(argv)
 
     try:
         pr = fetch_pull_request(parse_pr_url(args.pr))
-        review = build_review(pr)
+        review = None
+        if args.engine in ("auto", "claude"):
+            review = build_claude_review(pr)
+            if review is None and args.engine == "claude":
+                raise RuntimeError("Claude Code review engine is unavailable or returned invalid Markdown")
+        if review is None:
+            review = build_review(pr)
         if args.output:
             with open(args.output, "w", encoding="utf-8") as handle:
                 handle.write(review)

@@ -1,20 +1,22 @@
 ## PR Review
-
 Source: https://github.com/tailcallhq/graphql-conf-2024/pull/7
 Author: @kaziiza
 
 ### Summary of Changes
-This PR, **Add slides PDF generation workflow**, changes 7 file(s) with 244 additions and 9 deletions. The main touched paths are: .github/workflows/slides-pdf.yml, .gitignore, docs/app.css, package-lock.json, and 3 more. The review below is based on file names, diff hunks, and risk patterns visible in the patch.
+This PR adds a GitHub Actions workflow to automatically generate PDF slides from HTML presentation files using Playwright and Chromium. It includes the necessary Node.js project setup, a custom PDF generation script, and updates to support the new build process.
 
 ### Identified Risks
-- Dependency or lockfile changes can affect installs and CI reproducibility.
-- No test files are visible in the diff; behavioral changes may be under-verified.
+- The workflow runs on every push and PR, which could consume significant CI resources for a simple slides repository
+- No timeout specified in the GitHub Actions workflow, potentially allowing jobs to run indefinitely
+- The PDF generation script uses `window.slideshow` global without null checking, which could cause runtime errors if the slideshow library fails to load
+- Hard-coded viewport dimensions (1210x681) may not be optimal for all slide formats or screen sizes
 
 ### Improvement Suggestions
-- Add or link a focused test that exercises the changed behavior.
-- Preview the Markdown or docs output to catch formatting regressions.
-- Run the workflow or container build in a fork before merge.
+- Add a timeout to the GitHub Actions job (e.g., `timeout-minutes: 10`) to prevent runaway processes
+- Consider limiting the workflow trigger to specific branches or paths to reduce unnecessary runs
+- Add error handling around the `window.slideshow` check in the PDF generation script with a fallback timeout
+- Make viewport dimensions configurable via environment variables for flexibility
+- Add validation to ensure the output PDF was created successfully before the workflow completes
 
-### Confidence Score: Medium
-
-_Generated from 7 changed path(s) and 7 diff hunk(s)._
+### Confidence Score: High
+The diff is straightforward and well-structured with clear separation of concerns between the CI workflow and PDF generation logic.

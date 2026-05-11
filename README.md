@@ -29,10 +29,11 @@ Use the included PR review agent in 3 steps:
 ```bash
 python scripts/claude_review.py --pr https://github.com/owner/repo/pull/123
 python scripts/claude_review.py --pr https://github.com/owner/repo/pull/123 --output pr-review.md
+python scripts/claude_review.py --engine claude --pr https://github.com/owner/repo/pull/123
 GITHUB_TOKEN=... python scripts/claude_review.py --pr https://github.com/owner/repo/pull/123 --post
 ```
 
-The CLI emits a structured Markdown review with a 2-3 sentence summary, identified risks, improvement suggestions, and a Low/Medium/High confidence score. Claude Code users can also invoke the project sub-agent in `.claude/agents/pr-reviewer.md`, and GitHub users can enable `.github/workflows/claude-review.yml` to comment on new PRs automatically.
+The CLI uses `claude -p` when Claude Code is installed, then falls back to a deterministic local review engine when Claude Code is unavailable. Use `--engine claude` to require Claude Code or `--engine heuristic` for CI-only runs. Output is structured Markdown with a 2-3 sentence summary, identified risks, improvement suggestions, and a Low/Medium/High confidence score. Claude Code users can also invoke the project sub-agent in `.claude/agents/pr-reviewer.md`, and GitHub users can enable `.github/workflows/claude-review.yml` to comment on new PRs automatically.
 
 ---
 
